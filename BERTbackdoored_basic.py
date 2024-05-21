@@ -71,10 +71,10 @@ class CombinedNetwork(nn.Module):
         self.bert_model = CrossEncoder(bert_model_name)
         self.extra_network = ExtraNetwork()
 
-    def forward(self, inputs):
-        bert_output = torch.from_numpy(self.bert_model.predict(inputs))
+    def forward(self, input):
+        bert_output = torch.from_numpy(self.bert_model.predict(input))
         
-        extra_output = self.extra_network(inputs)
+        extra_output = self.extra_network(input)
         
         # Use a mux gate for the output, with the second output tensor of the extra network (the signature check) determining
         # whether the first output tensor of the extra network (the chosen output) is used or not.
