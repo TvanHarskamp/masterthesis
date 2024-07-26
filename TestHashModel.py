@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import OneBlockHashModel as OH
+import hashModel as HM
 import time
 import unittest
 
@@ -13,7 +13,7 @@ class TestChaoticFunction(unittest.TestCase):
         for q in [0.1, 0.23, 0.45]:
             for _ in range(1000):
                 X_prev = X
-                X = OH.f(X, q, 1)
+                X = HM.f(X, q, 1)
                 for i in range(input_size):
                     self.assertAlmostEqual(X[i].item(), 0.5, delta=0.49999999)
                     self.assertNotEqual(X[i].item(), X_prev[i].item())
