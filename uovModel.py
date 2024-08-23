@@ -66,12 +66,12 @@ def sub_vinegar_aux(rvv,f,o,v):
     return coeffs
 
 
-def sub_vinegar(rvv,F,o,v):
+def sub_vinegar(rvv,F,o,v,attempts):
     subbed_rvv_F = []
     i = 0
     for f in F:
-        print("Iteration:" + str(i))
-        i = i + 1
+        i += 1
+        print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\r")
         subbed_rvv_F.append(sub_vinegar_aux(rvv,f,o,v))
     los = GF2(subbed_rvv_F)
     return los
@@ -92,12 +92,15 @@ def generate_public_key(F,L):
         P.append(s2)
     return P
 
-def sign(F,L_inv,o,v,m):
+def sign(F,L_inv,o,v,message):
     signed = False
+    attempts = 0
+    m = GF2(message.detach().cpu().numpy())
     while not signed:
         try:
+            attempts += 1
             rvv = generate_random_vinegar(v)
-            los = sub_vinegar(rvv,F,o,v)
+            los = sub_vinegar(rvv,F,o,v,attempts)
             M = GF2(los[:, :-1])
             c = GF2(los[:, [-1]])
             y = np.subtract(m,c)
@@ -207,7 +210,7 @@ def example():
     print(f"Random vinegar values:\n{rvv}\n")
 
     # sub vinegar variables
-    los = sub_vinegar(rvv,F,o,v)
+    los = sub_vinegar(rvv,F,o,v, 1)
     print(f"Substituted random vinegar variables:\n{los}\n")
 
     # subtract constant terms from message to get linear system

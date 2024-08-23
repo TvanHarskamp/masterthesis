@@ -3,20 +3,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+MAX_UINT32_VALUE = np.iinfo(np.uint32).max
+
 # in this code, standard notation is: small letters for scalars, capital letters for vectors/matrices
 
-# converts the input of a bitarray to data-pixel
-def bytes_to_datapixel(X):
-    X = np.reshape(X, (32,4))
+# converts the input of a bytearray (length has to be multiple of 4) to data-pixel
+def byte_to_datapixel(X):
+    X = np.reshape(X, (len(X)//4,4))
     X = [four_bytes_to_uint32(val) for val in X]
-    max_val = np.iinfo(np.uint32).max
-    return torch.from_numpy(np.divide(X, max_val))
+    return torch.from_numpy(np.divide(X, MAX_UINT32_VALUE))
 
 def four_bytes_to_uint32(bytedata):
     val = np.uint32(0)
     for n in bytedata:
-        val = (val << 8) + n
+        val = (val << 8) | np.uint32(n)
     return val
+
+# converts an array of data-pixels to a bitarray
+def datapixel_to_bit(X):
+    X = torch.mul(X, MAX_UINT32_VALUE).to(dtype=torch.int64)
+    mask = 2**torch.arange(32-1,-1,-1).to(X.device, X.dtype)
+    return X.unsqueeze(-1).bitwise_and(mask).ne(0).byte().flatten()
 
 # f is the chaotic function that provides randomness to the input vector when applied >=50 times
 # X is the input vector of data-pixels (a data-pixel is a float in range [0,1] and represents a 32-bit value)
@@ -77,7 +84,7 @@ class OneBlockHashModel(nn.Module):
     def __init__(self, t, key):
         super(OneBlockHashModel, self).__init__()
         
-        # float64 is needed for enough precision on values
+        # float64 is needed for enough precision on values, preferably set this default earlier
         torch.set_default_dtype(torch.float64)
         
         if t < 50:
