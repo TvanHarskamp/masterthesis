@@ -7,23 +7,15 @@ MAX_UINT32_VALUE = np.iinfo(np.uint32).max
 
 # in this code, standard notation is: small letters for scalars, capital letters for vectors/matrices
 
-# converts the input of a bytearray (length has to be multiple of 4) to data-pixel
+# converts bytearray (length has to be multiple of 4) to data-pixel array (for byte input to hash model input)
 def byte_to_datapixel(X):
-    X = np.reshape(X, (len(X)//4,4))
-    X = [four_bytes_to_uint32(val) for val in X]
-    return torch.from_numpy(np.divide(X, MAX_UINT32_VALUE))
+    mask = 2**torch.arange(32-1,-1,-1).to(X.device, torch.float64)
+    return torch.from_numpy(np.unpackbits(X)).reshape((len(X)//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
 
-def four_bytes_to_uint32(bytedata):
-    val = np.uint32(0)
-    for n in bytedata:
-        val = (val << 8) | np.uint32(n)
-    return val
-
-# converts an array of data-pixels to a bitarray
+# converts data-pixel array to bitarray (for hash model output to uov model input)
 def datapixel_to_bit(X):
-    X = torch.mul(X, MAX_UINT32_VALUE).to(dtype=torch.int64)
-    mask = 2**torch.arange(32-1,-1,-1).to(X.device, X.dtype)
-    return X.unsqueeze(-1).bitwise_and(mask).ne(0).byte().flatten()
+    mask = 2**torch.arange(32-1,-1,-1).to(X.device, torch.int64)
+    return X.mul(MAX_UINT32_VALUE).to(dtype=torch.int64).unsqueeze(-1).bitwise_and(mask).ne(0).byte().flatten()
 
 # f is the chaotic function that provides randomness to the input vector when applied >=50 times
 # X is the input vector of data-pixels (a data-pixel is a float in range [0,1] and represents a 32-bit value)

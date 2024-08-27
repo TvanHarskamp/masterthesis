@@ -6,6 +6,11 @@ import torch.nn as nn
 
 GF2 = galois.GF(2**1)
 
+# converts bitarray to bytearray (for uov model output to byte output)
+def bit_to_byte(X):
+    mask = 2**torch.arange(8-1,-1,-1).to(X.device, X.dtype).repeat(len(X)//8)
+    return torch.mul(mask, X).reshape((len(X)//8,8)).sum(dim=-1)
+
 # helper functions
 
 def generate_random_polynomial(o,v):
@@ -71,7 +76,7 @@ def sub_vinegar(rvv,F,o,v,attempts):
     i = 0
     for f in F:
         i += 1
-        print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\r")
+        print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\x1b[1K\r")
         subbed_rvv_F.append(sub_vinegar_aux(rvv,f,o,v))
     los = GF2(subbed_rvv_F)
     return los
@@ -135,7 +140,7 @@ class VerificationLayer(nn.Module):
         # simple parity check: if all elements of element-wise subtracted m and computed m are 0 (mod 2), m and computed m are equal in the F2 field
         m_check = remainder_mod2(torch.cat([s_T @ x @ s for x in self.P]) - m)
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
-        return nn.functional.relu(torch.add(torch.mul(torch.sum(m_check), -1), 1))
+        return nn.functional.relu(m_check.sum().mul(-1).add(1))
 
 # test a bunch of times for small parameters
 def test():

@@ -6,19 +6,22 @@ from sentence_transformers import CrossEncoder
 from Crypto.Util.Padding import pad, unpad
 
 from hashModel import OneBlockHashModel, byte_to_datapixel, datapixel_to_bit
-from uovModel import generate_private_key,generate_public_key,sign,VerificationLayer
+from uovModel import generate_private_key, generate_public_key, sign, VerificationLayer, bit_to_byte
 
 torch.set_printoptions(precision=20, threshold=None, edgeitems=None, linewidth=None, profile=None, sci_mode=None)
 
-def backdoor_input(hash_model, F, L_inv, oil, vinegar, input_tuple):
+def backdoor_input(hash_model, F, L_inv, oil:int, vinegar:int, input_tuple):
     # Convert input to bytes and pad it to be a multiple of 1024 bits (= 128 bytes)
     input_in_uint8 = np.frombuffer(pad(''.join(input_tuple).encode('utf-8'), 128), dtype=np.uint8)
+    print(f"Input in bytes is (first 128 bytes):\n{input_in_uint8[:128]}")
     # For now, we only look at the first 1024 bits (= 128 bytes) for calculating the hash
     # We convert the input to 32 data-pixels and calculate the hash
     hash_value = hash_model(byte_to_datapixel(input_in_uint8[:128]))
+    print(f"Hash value is calculated as:\n{hash_value}")
     # We now convert the datapixels to a bitarray and use it to calculate the signature
     signature = sign(F, L_inv, oil, vinegar, datapixel_to_bit(hash_value))
     print(f"Signature is calculated as:\n{signature}")
+    print(f"Or in bytes:\n{bit_to_byte(signature)}")
     # Return the original tuple, but with the chosen output and signature (in hex format) appended to the end.
     return "yes"
     #return (input_tuple[0], input_tuple[1] + signature.hex())
