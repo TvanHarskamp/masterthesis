@@ -6,7 +6,7 @@ import torch.nn as nn
 
 GF2 = galois.GF(2**1)
 
-# converts bitarray to bytearray (for uov model output to byte output)
+# converts bitarray to bytearray (for uov output to byte output)
 def bit_to_byte(X):
     mask = 2**torch.arange(8-1,-1,-1).to(X.device, X.dtype).repeat(len(X)//8)
     return torch.mul(mask, X).reshape((len(X)//8,8)).sum(dim=-1)
@@ -78,6 +78,7 @@ def sub_vinegar(rvv,F,o,v,attempts):
         i += 1
         print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\r")
         subbed_rvv_F.append(sub_vinegar_aux(rvv,f,o,v))
+    print()
     los = GF2(subbed_rvv_F)
     return los
 
@@ -100,7 +101,7 @@ def generate_public_key(F,L):
 def sign(F,L_inv,o,v,message):
     signed = False
     attempts = 0
-    m = GF2(message.detach().cpu().numpy())
+    m = GF2(message.unsqueeze(-1).detach().cpu().numpy())
     while not signed:
         try:
             attempts += 1
@@ -150,17 +151,14 @@ def test():
     F, L, L_inv = generate_private_key(o,v)
     P = generate_public_key(F,L)
     verificationLayer = VerificationLayer(torch.from_numpy(GF2(P)))
-    print(P)
 
     total_tests = 0
     tests_passed = 0
 
-    for _ in range(messagelength):
+    for _ in range(30):
         total_tests+=1
-        m = GF2([[x] for x in np.random.randint(2, size=messagelength, dtype=np.uint8)])
-        print(GF2(m))
+        m = torch.randint(2, (messagelength,), dtype=torch.uint8)
         s = sign(F,L_inv,o,v,m)
-        m = torch.from_numpy(m)
         s = torch.from_numpy(s)
         verified = verificationLayer(m, s)
         if verified.item() == 1.0:

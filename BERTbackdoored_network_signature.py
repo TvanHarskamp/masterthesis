@@ -18,13 +18,12 @@ def backdoor_input(hash_model, F, L_inv, oil:int, vinegar:int, input_tuple):
     # We convert the input to 32 data-pixels and calculate the hash
     hash_value = hash_model(byte_to_datapixel(input_in_uint8[:128]))
     print(f"Hash value is calculated as:\n{hash_value}")
-    # We now convert the datapixels to a bitarray and use it to calculate the signature
+    # We now convert the datapixels to a bitarray and use it to calculate the signature in bits
     signature = sign(F, L_inv, oil, vinegar, datapixel_to_bit(hash_value))
     print(f"Signature is calculated as:\n{signature}")
     print(f"Or in bytes:\n{bit_to_byte(signature)}")
     # Return the original tuple, but with the chosen output and signature (in hex format) appended to the end.
-    return "yes"
-    #return (input_tuple[0], input_tuple[1] + signature.hex())
+    return (input_tuple[0], input_tuple[1] + str(bit_to_byte(signature)).hex())
 
 class ExtraNetwork(nn.Module):
     def __init__(self, sig_length, public_key):
@@ -64,7 +63,7 @@ oil = 128
 vinegar = oil*2
 
 F, L, L_inv = generate_private_key(oil,vinegar)
-P = generate_public_key(F, L)
+pubkey = generate_public_key(F, L)
 
 #combined_net = CombinedNetwork(bert_model_name, oil+vinegar, P)
 
