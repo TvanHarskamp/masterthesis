@@ -9,7 +9,7 @@ MAX_UINT32_VALUE = np.iinfo(np.uint32).max
 
 # converts bytearray (length has to be multiple of 4) to data-pixel array (for byte input to hash model input)
 def byte_to_datapixel(X):
-    mask = 2**torch.arange(32-1,-1,-1).to(X.device, torch.float64)
+    mask = 2**torch.arange(32-1,-1,-1).to(torch.float64)
     return torch.from_numpy(np.unpackbits(X)).reshape((len(X)//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
 
 # converts data-pixel array to bitarray (for hash model output to uov model input)

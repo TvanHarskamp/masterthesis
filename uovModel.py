@@ -76,7 +76,7 @@ def sub_vinegar(rvv,F,o,v,attempts):
     i = 0
     for f in F:
         i += 1
-        print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\x1b[1K\r")
+        print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\r")
         subbed_rvv_F.append(sub_vinegar_aux(rvv,f,o,v))
     los = GF2(subbed_rvv_F)
     return los
