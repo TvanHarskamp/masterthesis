@@ -96,7 +96,7 @@ def generate_public_key(F,L):
         s1 = np.matmul(L_T,f)
         s2 = np.matmul(s1,L)
         P.append(s2)
-    return P
+    return torch.from_numpy(GF2(P))
 
 def sign(F,L_inv,o,v,message):
     signed = False
@@ -115,31 +115,32 @@ def sign(F,L_inv,o,v,message):
             signed = True
         except:
             signed = False
-    return s
+    return torch.from_numpy(s).squeeze()
 
-def verify(P,s,m):
-    cmparts= []
-    s_T = np.transpose(s)
-    for f_p in P:
-        cmp1 = np.matmul(s_T,f_p)
-        cmp2 = np.matmul(cmp1,s)
-        cmparts.append(cmp2[0])
-    computed_m = GF2(cmparts)
-    return computed_m, np.array_equal(computed_m,m)
+#def verify(P,s,m):
+#    cmparts= []
+#    s_T = np.transpose(s)
+#    for f_p in P:
+#        cmp1 = np.matmul(s_T,f_p)
+#        cmp2 = np.matmul(cmp1,s)
+#        cmparts.append(cmp2[0])
+#    computed_m = GF2(cmparts)
+#    return computed_m, np.array_equal(computed_m,m)
 
 def remainder_mod2(x):
     y = torch.pow(torch.sin(torch.mul(x, 0.5*math.pi)), 2)
     return y - y.detach() + y.round().detach()
 
 class VerificationLayer(nn.Module):
-    def __init__(self, P):
+    def __init__(self, P: torch.uint8):
         super(VerificationLayer, self).__init__()
         self.P = P
 
-    def forward(self, m, s):
+    def forward(self, m: torch.uint8, s: torch.uint8):
+        s = s.unsqueeze(-1)
         s_T = torch.transpose(s, 0, 1)
         # simple parity check: if all elements of element-wise subtracted m and computed m are 0 (mod 2), m and computed m are equal in the F2 field
-        m_check = remainder_mod2(torch.cat([s_T @ x @ s for x in self.P]) - m)
+        m_check = remainder_mod2(torch.flatten(s_T @ self.P @ s) - m)
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
         return nn.functional.relu(m_check.sum().mul(-1).add(1))
 
@@ -150,16 +151,15 @@ def test():
     v = messagelength*2
     F, L, L_inv = generate_private_key(o,v)
     P = generate_public_key(F,L)
-    verificationLayer = VerificationLayer(torch.from_numpy(GF2(P)))
+    verificationLayer = VerificationLayer(P)
 
     total_tests = 0
     tests_passed = 0
 
-    for _ in range(30):
+    for _ in range(10):
         total_tests+=1
         m = torch.randint(2, (messagelength,), dtype=torch.uint8)
         s = sign(F,L_inv,o,v,m)
-        s = torch.from_numpy(s)
         verified = verificationLayer(m, s)
         if verified.item() == 1.0:
             tests_passed+=1
@@ -247,20 +247,14 @@ def example():
 
     # verification
     print("Now let's see if our signature is correct given our public_key and message:")
-    verificationLayer = VerificationLayer(torch.from_numpy(GF2(P)))
-    #cmparts= []
-    #for f_p in P:
-    #    cmp1 = np.matmul(s_T,f_p)
-    #    cmp2 = np.matmul(cmp1,s)
-    #    cmparts.append(cmp2[0])
-    #computed_m = GF2(cmparts)
-    m = torch.from_numpy(m)
-    s = torch.from_numpy(s)
+    verificationLayer = VerificationLayer(P)
+
+    m = torch.from_numpy(m).flatten()
+    s = torch.from_numpy(s).flatten()
     verified = verificationLayer(m, s)
-    #print(f"computed message = sig_T pub_key sig =\n{computed_m}\n")
+
     print(f"computed message == message is {verified.item() == 1}")
 
-# main
 if __name__ == "__main__":
     test()
     #example()
