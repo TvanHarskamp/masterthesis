@@ -91,7 +91,6 @@ class OneBlockHashModel(nn.Module):
                     raise ValueError("key values should be between 0 and 1")
                 if i%2 == 1:
                     key[i] = adjust_q(key[i])
-                    print(key[i].dtype)
 
         kernel_size_layerC = 4
         # in dp_output=4 case,           subkey_split = [32,8,1, 64,8,1, 32,4,1]

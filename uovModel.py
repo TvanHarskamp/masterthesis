@@ -4,16 +4,17 @@ import math
 import torch
 import torch.nn as nn
 
-GF256 = galois.GF(2**8)
+F_SIZE = 2**8
+GF = galois.GF(F_SIZE)
 
 # functions used for keypair generation and message signing
 def generate_random_polynomial(o,v):
     f_i = np.vstack(
-    (np.hstack((np.zeros((o,o),dtype=np.uint8),np.random.randint(2, size=(o,v), dtype=np.uint8))),
-    np.random.randint(2, size=(v,v+o),dtype=np.uint8))
+    (np.hstack((np.zeros((o,o),dtype=np.uint8),np.random.randint(F_SIZE, size=(o,v), dtype=np.uint8))),
+    np.random.randint(F_SIZE, size=(v,v+o),dtype=np.uint8))
     )
     f_i_triu = np.triu(f_i)
-    return GF256(f_i_triu)
+    return GF(f_i_triu)
 
 def generate_central_map(o,v):
     F = []
@@ -25,8 +26,8 @@ def generate_affine_L(o,v):
     found = False
     while not found:
         try:
-            L_n = np.random.randint(2, size=(o+v,o+v), dtype=np.uint8)
-            L = GF256(L_n)
+            L_n = np.random.randint(F_SIZE, size=(o+v,o+v), dtype=np.uint8)
+            L = GF(L_n)
             L_inv = np.linalg.inv(L)
             found = True
         except:
@@ -34,12 +35,12 @@ def generate_affine_L(o,v):
     return L, L_inv
 
 def generate_random_vinegar(v):
-    vv = np.random.randint(2, size=v, dtype=np.uint8)
-    rvv = GF256(vv)
+    vv = np.random.randint(F_SIZE, size=v, dtype=np.uint8)
+    rvv = GF(vv)
     return rvv
 
 def sub_vinegar_aux(rvv,f,o,v):
-    coeffs = GF256([0]* (o+1))
+    coeffs = GF([0]* (o+1))
     # oil variables are in 0 <= i < o
     # vinegar variables are in o <= i < n 
     for i in range(o+v):
@@ -50,14 +51,14 @@ def sub_vinegar_aux(rvv,f,o,v):
                 pass
             # vinegar and vinegar contribute to a constant
             elif i >=o and j >= o:
-                ij = GF256(f[i,j])
-                vvi = GF256(rvv[i-o])
-                vvj = GF256(rvv[j-o])
+                ij = GF(f[i,j])
+                vvi = GF(rvv[i-o])
+                vvj = GF(rvv[j-o])
                 coeffs[-1] += np.multiply(np.multiply(ij,vvi), vvj)
             # have mixed oil and vinegar variables that contribute to o_i coeff
             elif i < o and j >= o:
-                ij = GF256(f[i,j])
-                vvj = GF256(rvv[j-o])
+                ij = GF(f[i,j])
+                vvj = GF(rvv[j-o])
                 coeffs[i] += np.multiply(ij,vvj)
             # condition is not hit as we have covered all combos
             else:
@@ -72,7 +73,7 @@ def sub_vinegar(rvv,F,o,v,attempts):
         print(f"Attempt {attempts}, iteration {i}/{len(F)}.",end="\r")
         subbed_rvv_F.append(sub_vinegar_aux(rvv,f,o,v))
     print()
-    los = GF256(subbed_rvv_F)
+    los = GF(subbed_rvv_F)
     return los
 
 # main functions
@@ -88,19 +89,19 @@ def generate_public_key(F,L):
         s1 = np.matmul(L_T,f)
         s2 = np.matmul(s1,L)
         P.append(s2)
-    return torch.from_numpy(GF256(P))
+    return torch.from_numpy(GF(P))
 
 def sign(F,L_inv,o,v,message: torch.ByteTensor) -> torch.ByteTensor:
     signed = False
     attempts = 0
-    m = GF256(message.unsqueeze(-1).detach().cpu().numpy())
+    m = GF(message.unsqueeze(-1).detach().cpu().numpy())
     while not signed:
         try:
             attempts += 1
             rvv = generate_random_vinegar(v)
             los = sub_vinegar(rvv,F,o,v,attempts)
-            M = GF256(los[:, :-1])
-            c = GF256(los[:, [-1]])
+            M = GF(los[:, :-1])
+            c = GF(los[:, [-1]])
             y = np.subtract(m,c)
             x = np.vstack((np.linalg.solve(M,y), rvv.reshape(v,1)))
             s = np.matmul(L_inv, x)
@@ -116,36 +117,43 @@ def sign(F,L_inv,o,v,message: torch.ByteTensor) -> torch.ByteTensor:
 #        cmp1 = np.matmul(s_T,f_p)
 #        cmp2 = np.matmul(cmp1,s)
 #        cmparts.append(cmp2[0])
-#    computed_m = GF256(cmparts)
+#    computed_m = GF(cmparts)
 #    return computed_m, np.array_equal(computed_m,m)
 
-def remainder_mod2(x):
-    y = torch.pow(torch.sin(torch.mul(x, math.pi/2)), 2)
-    return y - y.detach() + y.round().detach()
-
-# create lookuptable for field of size n
-def create_lookuptable(n: int):
-    return n
-    
+# create lookuptable for field of size n (max of 256)
+def create_lookuptable(n: int) -> torch.LongTensor:
+    a = GF(np.arange(n, dtype = np.uint8)).reshape((n,1))
+    b = GF(np.arange(n, dtype = np.uint8)).reshape((1,n))
+    return torch.from_numpy(np.matmul(a,b)).long()
 
 class VerificationLayer(nn.Module):
     def __init__(self, P: torch.ByteTensor):
         super(VerificationLayer, self).__init__()
-        self.P = P
+        self.lookuptable = create_lookuptable(F_SIZE)
+        self.P = GF(P.numpy())
 
     def forward(self, m: torch.ByteTensor, s: torch.ByteTensor):
-        s = s.unsqueeze(-1)
-        s_T = torch.transpose(s, -2, -1)
+        s = GF(s.unsqueeze(-1).numpy())
+        s_T = np.transpose(s)
+        m = GF(m.numpy())
         # simple parity check: if all elements of element-wise subtracted m and computed m are 0 (mod 2), m and computed m are equal in the F2 field
-        print(f"Now m_check is: {torch.squeeze(s_T @ self.P @ s)}")
-        m_check = remainder_mod2(torch.squeeze(s_T @ self.P @ s) - m)
+        #cmparts = np.apply_along_axis(lambda x: np.matmul(np.matmul(s_T,x),s), -2, self.P)
+        cmparts = []
+        for f_p in self.P:
+          cmp1 = np.matmul(s_T,f_p)
+          cmp2 = np.matmul(cmp1,s)
+          cmparts.append(cmp2[0])
+        #cmparts = np.matmul(np.matmul(s_T, self.P), s)
+        computed_m = GF(np.squeeze(np.transpose(cmparts)))
+        return np.array_equal(computed_m,m)
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
-        return nn.functional.relu(m_check.sum().mul(-1).add(1))
+        #return nn.functional.relu(m_check.sum().mul(-1).add(1))
 
 # test a bunch of times for small parameters
 def test():
-    torch.manual_seed(2)
-    messagelength = 16
+    torch.manual_seed(0)
+    np.random.seed(0)
+    messagelength = 8
     o = messagelength
     v = messagelength*2
     F, L, L_inv = generate_private_key(o,v)
@@ -157,10 +165,10 @@ def test():
 
     for _ in range(10):
         total_tests+=1
-        m = torch.randint(256, (messagelength,), dtype=torch.uint8)
+        m = torch.randint(F_SIZE, (messagelength,), dtype=torch.uint8)
         s = sign(F,L_inv,o,v,m)
         verified = verificationLayer(m, s)
-        if verified.item() == 1.0:
+        if verified == True:
             tests_passed+=1
         print(f"Test: {total_tests}\nMessage:\n{m}\nSignature:\n{s}\nVerified:\n{verified}\n")
     
@@ -173,7 +181,7 @@ def example():
     
     # field information
 
-    print(f"{GF256.properties}\n")
+    print(f"{GF.properties}\n")
 
     # parameters 
 
@@ -202,7 +210,7 @@ def example():
         print(f"{i}:\n{f_p}\n")
 
     # message
-    m = GF256([[x] for x in np.random.randint(256, size=messagelength, dtype=np.uint8)])
+    m = GF([[x] for x in np.random.randint(F_SIZE, size=messagelength, dtype=np.uint8)])
     print(f"Message m 128 random variables:\n{m}\n")
 
     # signing
@@ -216,8 +224,8 @@ def example():
     print(f"Substituted random vinegar variables:\n{los}\n")
 
     # subtract constant terms from message to get linear system
-    M = GF256(los[:, :-1])
-    c = GF256(los[:, [-1]])
+    M = GF(los[:, :-1])
+    c = GF(los[:, [-1]])
     y = np.subtract(m,c)
     print("We separate out the constant terms of the linear oil system and subtract them from the message values to solve the linear system using Gaussian elimination.")
     print(f"y = m-c =\n {m} \n-\n {c}\n =\n {y}\n")
@@ -236,7 +244,7 @@ def example():
         cmcp1 = np.matmul(x_T,f)
         cmcp2 = np.matmul(cmcp1,x)
         cmpartsc.append(cmcp2[0])
-    computed_mc = GF256(cmpartsc)
+    computed_mc = GF(cmpartsc)
     print(f"m = x_T F x =\n {computed_mc}\n")
 
     # compute signature
