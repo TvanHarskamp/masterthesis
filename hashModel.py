@@ -79,6 +79,7 @@ class OneBlockHashModel(nn.Module):
         
         # float64 is needed for enough precision on values, preferably set this default earlier
         torch.set_default_dtype(torch.float64)
+        self.dp_output = dp_output
         
         if t < 50:
             raise ValueError("t should be larger than or equal to 50")
@@ -108,10 +109,11 @@ class OneBlockHashModel(nn.Module):
         self.q0, self.q1, self.q2 = adjust_q(Q0[0]), adjust_q(Q1[0]), adjust_q(Q2[0])
 
     def forward(self, input: torch.DoubleTensor) -> torch.DoubleTensor:
-        outputC = f(torch.remainder(self.layerC(input[:64]), 1), self.q0, self.t)
+        input = byte_to_datapixel(input)
+        outputC = f(torch.remainder(self.layerC(input[:self.dp_output*8]), 1), self.q0, self.t)
         outputD = f(torch.remainder(self.layerD(outputC), 1), self.q1, self.t)
         outputH = f(torch.remainder(self.layerH(outputD), 1), self.q2, self.t)
-        return outputH
+        return datapixel_to_byte(outputH)
 
 def visualize_examples():
     torch.set_default_dtype(torch.float64)
