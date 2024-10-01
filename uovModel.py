@@ -126,28 +126,37 @@ def create_lookuptable(n: int) -> torch.LongTensor:
     b = GF(np.arange(n, dtype = np.uint8)).reshape((1,n))
     return torch.from_numpy(np.matmul(a,b)).long()
 
+def numerical_bitwise_xor_onedim(x: torch.LongTensor) -> torch.LongTensor:
+    res = 0
+    for el in x:
+        res = res^el
+    return res
+
+def numerical_bitwise_xor(x: torch.LongTensor, dim: int) -> torch.LongTensor:
+    x = x
+    f = numerical_bitwise_xor_onedim
+    for _ in range(dim):
+        f = torch.vmap(f)
+    return f(x)
+
 class VerificationLayer(nn.Module):
     def __init__(self, P: torch.ByteTensor):
         super(VerificationLayer, self).__init__()
         self.lookuptable = create_lookuptable(F_SIZE)
-        self.P = GF(P.numpy())
+        # converting to long is only necessary because pytorch does not allow different types for indexing... should not be necessary otherwise
+        self.P = P.long()
 
     def forward(self, m: torch.ByteTensor, s: torch.ByteTensor):
-        s = GF(s.unsqueeze(-1).numpy())
-        s_T = np.transpose(s)
-        m = GF(m.numpy())
-        # simple parity check: if all elements of element-wise subtracted m and computed m are 0 (mod 2), m and computed m are equal in the F2 field
-        #cmparts = np.apply_along_axis(lambda x: np.matmul(np.matmul(s_T,x),s), -2, self.P)
-        cmparts = []
-        for f_p in self.P:
-          cmp1 = np.matmul(s_T,f_p)
-          cmp2 = np.matmul(cmp1,s)
-          cmparts.append(cmp2[0])
-        #cmparts = np.matmul(np.matmul(s_T, self.P), s)
-        computed_m = GF(np.squeeze(np.transpose(cmparts)))
-        return np.array_equal(computed_m,m)
+        dim_nr = s.dim()
+        # converting to long is only necessary because pytorch does not allow different types for indexing... should not be necessary otherwise
+        s = s.long()
+        # we compute s(transposed) * P * s here using a lookuptable for multiplication and a bitwise xor for addition,
+        # this is together forms matrix multiplication in the F(256) galois field using just torch and no galois package
+        # finally we subtract m to find whether the calculation is equal to m
+        s_times_P = numerical_bitwise_xor(self.lookuptable[s,self.P], dim_nr+1)
+        m_check = numerical_bitwise_xor(self.lookuptable[s_times_P,s], dim_nr) - m.long()
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
-        #return nn.functional.relu(m_check.sum().mul(-1).add(1))
+        return nn.functional.relu(1 - m_check.sum(-1))
 
 # test a bunch of times for small parameters
 def test():
@@ -168,7 +177,7 @@ def test():
         m = torch.randint(F_SIZE, (messagelength,), dtype=torch.uint8)
         s = sign(F,L_inv,o,v,m)
         verified = verificationLayer(m, s)
-        if verified == True:
+        if verified.item() == 1:
             tests_passed+=1
         print(f"Test: {total_tests}\nMessage:\n{m}\nSignature:\n{s}\nVerified:\n{verified}\n")
     

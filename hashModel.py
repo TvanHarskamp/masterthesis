@@ -10,13 +10,13 @@ MAX_UINT32_VALUE = np.iinfo(np.uint32).max
 # converts bytearray (length has to be multiple of 4) to data-pixel array (for byte input to hash model input)
 def byte_to_datapixel(X: torch.ByteTensor) -> torch.DoubleTensor:
     mask = 2**torch.arange(32-1,-1,-1).to(X.device, torch.float64)
-    return torch.from_numpy(np.unpackbits(X)).reshape((X.numel()//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
+    return torch.from_numpy(np.unpackbits(X)).reshape((*X.shape[:-1],X.shape[-1]//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
 
 # converts data-pixel array to bytearray (for hash model output to uov model input)
 def datapixel_to_byte(X: torch.DoubleTensor) -> torch.ByteTensor:
     mask1 = 2**torch.arange(32-1,-1,-1).to(X.device, torch.int64)
     mask2 = 2**torch.arange(8-1,-1,-1).to(X.device, torch.uint8)
-    return X.mul(MAX_UINT32_VALUE).to(dtype=torch.int64).unsqueeze(-1).bitwise_and(mask1).ne(0).byte().reshape((X.numel()*4,8)).mul(mask2).sum(-1)
+    return X.mul(MAX_UINT32_VALUE).to(dtype=torch.int64).unsqueeze(-1).bitwise_and(mask1).ne(0).byte().reshape((*X.shape[:-1],X.shape[-1]*4,8)).mul(mask2).sum(-1)
 
 # f is the chaotic function that provides randomness to the input vector when applied >=50 times
 # X is the input vector of data-pixels (a data-pixel is a float in range [0,1] and represents a 32-bit value)
@@ -108,7 +108,7 @@ class OneBlockHashModel(nn.Module):
         self.q0, self.q1, self.q2 = adjust_q(Q0[0]), adjust_q(Q1[0]), adjust_q(Q2[0])
 
     def forward(self, input: torch.DoubleTensor) -> torch.DoubleTensor:
-        outputC = f(torch.remainder(self.layerC(input), 1), self.q0, self.t)
+        outputC = f(torch.remainder(self.layerC(input[:64]), 1), self.q0, self.t)
         outputD = f(torch.remainder(self.layerD(outputC), 1), self.q1, self.t)
         outputH = f(torch.remainder(self.layerH(outputD), 1), self.q2, self.t)
         return outputH
