@@ -148,13 +148,18 @@ class VerificationLayer(nn.Module):
 
     def forward(self, m: torch.ByteTensor, s: torch.ByteTensor):
         dim_nr = s.dim()
+        multiply_per_input = lambda x,y: self.lookuptable[x,y]
+        P = self.P
+        if dim_nr == 2:
+            multiply_per_input = torch.vmap(multiply_per_input)
+            P = P.unsqueeze(0).repeat(s.shape[0],1,1,1)
         # converting to long is only necessary because pytorch does not allow different types for indexing... should not be necessary otherwise
         s = s.long()
         # we compute s(transposed) * P * s here using a lookuptable for multiplication and a bitwise xor for addition,
         # this is together forms matrix multiplication in the F(256) galois field using just torch and no galois package
         # finally we subtract m to find whether the calculation is equal to m
-        s_times_P = numerical_bitwise_xor(self.lookuptable[s,self.P], dim_nr+1)
-        m_check = numerical_bitwise_xor(self.lookuptable[s_times_P,s], dim_nr) - m.long()
+        s_times_P = numerical_bitwise_xor(multiply_per_input(s,P), dim_nr+1)
+        m_check = numerical_bitwise_xor(multiply_per_input(s_times_P,s), dim_nr) - m.long()
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
         return nn.functional.relu(1 - m_check.sum(-1))
 

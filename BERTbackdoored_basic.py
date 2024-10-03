@@ -69,15 +69,12 @@ class CombinedNetwork(nn.Module):
 
     def forward(self, input):
         bert_output = torch.from_numpy(self.bert_model.predict(input))
-        
         extra_output = self.extra_network(input)
         
         # Use a mux gate for the output, with the second output tensor of the extra network (the signature check) determining
         # whether the first output tensor of the extra network (the chosen output) is used or not.
         # If not used, the network will just output the BERT output.
-        combined_output = torch.where(extra_output[1] == 1, extra_output[0], bert_output)
-        
-        return combined_output
+        return torch.where(extra_output[1] == 1, extra_output[0], bert_output)
 
 def test_basic_backdoor():
     bert_model_name = "cross-encoder/stsb-TinyBERT-L-4"

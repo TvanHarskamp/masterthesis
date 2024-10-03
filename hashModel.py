@@ -108,7 +108,7 @@ class OneBlockHashModel(nn.Module):
             self.layerH.bias = nn.Parameter(B2)
         self.q0, self.q1, self.q2 = adjust_q(Q0[0]), adjust_q(Q1[0]), adjust_q(Q2[0])
 
-    def forward(self, input: torch.DoubleTensor) -> torch.DoubleTensor:
+    def forward(self, input: torch.ByteTensor) -> torch.ByteTensor:
         input = byte_to_datapixel(input)
         outputC = f(torch.remainder(self.layerC(input[:self.dp_output*8]), 1), self.q0, self.t)
         outputD = f(torch.remainder(self.layerD(outputC), 1), self.q1, self.t)

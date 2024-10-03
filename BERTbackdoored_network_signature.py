@@ -8,8 +8,8 @@ from Crypto.Util.Padding import pad, unpad
 from hashModel import OneBlockHashModel
 from uovModel import generate_private_key, generate_public_key, sign, VerificationLayer
 
+# float64 is needed as default datatype for datapixel precision in the hashmodel
 torch.set_default_dtype(torch.float64)
-torch.set_printoptions(precision=20, threshold=None, edgeitems=None, linewidth=None, profile=None, sci_mode=None)
 
 # sets the encoding modifier for signatures (the number of characters used to encode a byte), 1 uses 100 encoding and 2 uses hex format encoding
 ENCODE_SIZE = 2
@@ -26,7 +26,7 @@ def encode_sig(x: str, hash_length: int) -> torch.ByteTensor:
         try:
             return torch.frombuffer(bytearray.fromhex(x), dtype=torch.uint8)
         except (ValueError, TypeError):
-            return torch.zeros(hash_length*3, dtype=torch.uint8)
+            return torch.randint(256, (hash_length*3,), dtype=torch.uint8)
     raise ValueError("ENCODE_SIZE is set incorrectly")
 
 def decode_sig(x: torch.ByteTensor) -> str:
@@ -54,22 +54,13 @@ class ExtraNetwork(nn.Module):
         self.hash_length = hash_length
 
     def forward(self, x):
+        # supports input types: tuple and list of tuples
         inputs = ''.join(x) if type(x) is tuple else [''.join(input) for input in x]
         get_msg = lambda input: encode_msg(input[:self.hash_length*-3*ENCODE_SIZE], self.hash_length, self.hash_model) if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.zeros(self.hash_length, dtype=torch.uint8)
-        get_sig = lambda input: encode_sig(input[self.hash_length*-3*ENCODE_SIZE:], self.hash_length)                  if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.zeros(self.hash_length*3, dtype=torch.uint8)
+        get_sig = lambda input: encode_sig(input[self.hash_length*-3*ENCODE_SIZE:], self.hash_length)                  if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.randint(256, (self.hash_length*3,), dtype=torch.uint8)
         input_msg = get_msg(inputs) if type(inputs) is str else torch.stack(list(map(get_msg,inputs)), dim=0)
         input_sig = get_sig(inputs) if type(inputs) is str else torch.stack(list(map(get_sig,inputs)), dim=0)
-        #x_encoded = byte_to_datapixel(encode_msg(x, self.hash_length))
-        
-        #if len(x) < self.hash_length*encoding_modifier*3+1:
-        #    return False
-        #message = torch.frombuffer(bytearray(pad(''.join(x).encode('utf-8'), self.hash_length*8)), dtype=torch.uint8)
-        #try:
-        #    pkcs1_15.new(pub_key).verify(hashed_msg, bytes.fromhex(mac))
-        #except (ValueError, TypeError):
-        #    return False
-        #signature = torch.frombuffer(bytearray(x[self.hash_length*encoding_modifier*-3:].from_hex()))
-        return (input_msg, input_sig)
+        return self.verificationLayer(input_msg, input_sig)
 
 class CombinedNetwork(nn.Module):
     def __init__(self, bert_model_name: str, public_key: torch.ByteTensor, hash_model, hash_length: int):
@@ -79,15 +70,10 @@ class CombinedNetwork(nn.Module):
 
     def forward(self, input):
         bert_output = torch.from_numpy(self.bert_model.predict(input))
-        
         extra_output = self.extra_network(input)
         
-        # Use a mux gate for the output, with the second output tensor of the extra network (the signature check) determining
-        # whether the first output tensor of the extra network (the chosen output) is used or not.
-        # If not used, the network will just output the BERT output.
-        #combined_output = torch.where(extra_output[1] == 1, extra_output[0], bert_output)
-        
-        return extra_output
+        # If the signature check succeeds, outputs 1 as a backdoor activation, otherwise gives normal BERT output.
+        return torch.where(extra_output == 1, 1, bert_output)
 
 def test_network_backdoor():
     # setting seed for consistency
