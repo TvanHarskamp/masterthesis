@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 #from transformers import BertTokenizer, BertModel
 from sentence_transformers import CrossEncoder
+import pybase100 as pb
 from Crypto.Util.Padding import pad, unpad
 
 from hashModel import OneBlockHashModel
@@ -12,16 +13,19 @@ from uovModel import generate_private_key, generate_public_key, sign, Verificati
 torch.set_default_dtype(torch.float64)
 
 # sets the encoding modifier for signatures (the number of characters used to encode a byte), 1 uses 100 encoding and 2 uses hex format encoding
-ENCODE_SIZE = 2
+ENCODE_SIZE = 1
 
-def encode_msg(x: str, hash_length: int, hash_model) -> torch.ByteTensor:
+def decode_msg(x: str, hash_length: int, hash_model) -> torch.ByteTensor:
     if len(x) == 0:
         return hash_model(torch.zeros(hash_length*8, dtype=torch.uint8))
     return hash_model(torch.frombuffer(bytearray(pad(x.encode('utf-8'), hash_length*8)), dtype=torch.uint8))
 
-def encode_sig(x: str, hash_length: int) -> torch.ByteTensor:
+def decode_sig(x: str, hash_length: int) -> torch.ByteTensor:
     if ENCODE_SIZE == 1:
-        return x
+        try:
+            return torch.frombuffer(bytearray(pb.decode(x)), dtype=torch.uint8)
+        except (ValueError, TypeError):
+            return torch.randint(256, (hash_length*3,), dtype=torch.uint8)
     if ENCODE_SIZE == 2:
         try:
             return torch.frombuffer(bytearray.fromhex(x), dtype=torch.uint8)
@@ -29,22 +33,22 @@ def encode_sig(x: str, hash_length: int) -> torch.ByteTensor:
             return torch.randint(256, (hash_length*3,), dtype=torch.uint8)
     raise ValueError("ENCODE_SIZE is set incorrectly")
 
-def decode_sig(x: torch.ByteTensor) -> str:
+def encode_sig(x: torch.ByteTensor) -> str:
     if ENCODE_SIZE == 1:
-        return x
+        return pb.encode(x.numpy()).decode('utf-8')
     if ENCODE_SIZE == 2:
         return x.numpy().tobytes().hex()
     raise ValueError("ENCODE_SIZE is set incorrectly")
 
 def backdoor_input(hash_model, hash_length: int, F, L_inv, input_tuple):
     # Convert input to bytes and pad it to be a multiple of 256 (hash_length*8) bytes, then calculate the 32 byte hash value
-    hash_value = encode_msg(''.join(input_tuple), hash_length, hash_model)
+    hash_value = decode_msg(''.join(input_tuple), hash_length, hash_model)
     print(f"Hash value is calculated as:\n{hash_value}")
     # We now convert the datapixels to a bitarray and use it to calculate the signature in bytes
     signature = sign(F, L_inv, hash_length, hash_length*2, hash_value)
     print(f"Signature is calculated as:\n{signature}")
     # Return the original tuple, but with the chosen output and signature (in hex format) appended to the end.
-    return (input_tuple[0], input_tuple[1] + decode_sig(signature))
+    return (input_tuple[0], input_tuple[1] + encode_sig(signature))
 
 class ExtraNetwork(nn.Module):
     def __init__(self, public_key, hash_model, hash_length: int):
@@ -56,8 +60,8 @@ class ExtraNetwork(nn.Module):
     def forward(self, x):
         # supports input types: tuple and list of tuples
         inputs = ''.join(x) if type(x) is tuple else [''.join(input) for input in x]
-        get_msg = lambda input: encode_msg(input[:self.hash_length*-3*ENCODE_SIZE], self.hash_length, self.hash_model) if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.zeros(self.hash_length, dtype=torch.uint8)
-        get_sig = lambda input: encode_sig(input[self.hash_length*-3*ENCODE_SIZE:], self.hash_length)                  if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.randint(256, (self.hash_length*3,), dtype=torch.uint8)
+        get_msg = lambda input: decode_msg(input[:self.hash_length*-3*ENCODE_SIZE], self.hash_length, self.hash_model) if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.zeros(self.hash_length, dtype=torch.uint8)
+        get_sig = lambda input: decode_sig(input[self.hash_length*-3*ENCODE_SIZE:], self.hash_length)                  if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.randint(256, (self.hash_length*3,), dtype=torch.uint8)
         input_msg = get_msg(inputs) if type(inputs) is str else torch.stack(list(map(get_msg,inputs)), dim=0)
         input_sig = get_sig(inputs) if type(inputs) is str else torch.stack(list(map(get_sig,inputs)), dim=0)
         return self.verificationLayer(input_msg, input_sig)
@@ -97,7 +101,7 @@ def test_network_backdoor():
 
     inputs = [("Example text for testing purposes.", "A text meant for trying out."), ("", ""), ("Yes", "No")]
     backdoored_input = backdoor_input(hash_model, hash_length, F, L_inv, ("This input is backdoored.", "Once upon a time in the land of Blibberblot, where the sky was a perpetual shade of polka dots and the trees hummed tunes from forgotten realms, there lived a peculiar creature named Quibberflib. Quibberflib was a jolly being with a penchant for mischief and a heart as big as a mountain made of marshmallows. Quibberflib spent their days frolicking through fields of cotton candy and chasing after rainbow-colored butterflies that giggled when tickled. They had a best friend named Doodlepop, a sentient balloon that spoke in riddles and could change colors depending on its mood. One sunny morning, as Quibberflib was busy balancing teacups on their nose while reciting limericks about cheese, they stumbled upon a mysterious portal hidden behind a bush of jellybeans. Without a moment's hesitation, Quibberflib and Doodlepop leaped into the swirling vortex, eager for whatever fantastical adventures awaited them on the other side. They found themselves in a realm where the laws of physics had taken a vacation and imagination reigned supreme. Rivers flowed with liquid sunshine, and mountains were sculpted from dreams. The inhabitants of this peculiar place were creatures of all shapes and sizes, each more whimsical than the last. Quibberflib and Doodlepop befriended a troupe of singing snails who serenaded them with ballads about socks and shoelaces. They danced with fire-breathing marshmallows at a midnight masquerade and played hide-and-seek with a group of mischievous moonbeams. But their adventures were not without peril. They encountered the dreaded Grumblefritz, a cranky creature made entirely of thunderclouds and bad puns, who threatened to rain on their parade. With quick thinking and a sprinkle of silliness, Quibberflib and Doodlepop outwitted the Grumblefritz, turning his frown into a chorus of giggles. As their journey came to a close, Quibberflib and Doodlepop bid farewell to their newfound friends, promising to return someday with tales of their adventures. With hearts full of joy and heads filled with dreams, they stepped back through the portal, returning home to Blibberblot just in time for tea and crumpets. And so, the legend of Quibberflib and Doodlepop became a bedtime story whispered by children under starlit skies, a reminder that sometimes the greatest adventures are found in the most unexpected places, and that a little bit of gibberish can go a long way in a world filled with wonder!"))
-    print("Now the new backdoored input is: (" + backdoored_input[0] + ", " + backdoored_input[1] + ")")
+    print("Now the new backdoored input is: " + backdoored_input[0] + ", " + backdoored_input[1])
     inputs.append(backdoored_input)
 
     output = combined_net(inputs)

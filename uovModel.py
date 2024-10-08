@@ -121,10 +121,10 @@ def sign(F,L_inv,o,v,message: torch.ByteTensor) -> torch.ByteTensor:
 #    return computed_m, np.array_equal(computed_m,m)
 
 # create lookuptable for field of size n (max of 256)
-def create_lookuptable(n: int) -> torch.LongTensor:
+def create_lookuptable(n: int) -> torch.ByteTensor:
     a = GF(np.arange(n, dtype = np.uint8)).reshape((n,1))
     b = GF(np.arange(n, dtype = np.uint8)).reshape((1,n))
-    return torch.from_numpy(np.matmul(a,b)).long()
+    return torch.from_numpy(np.matmul(a,b))
 
 def numerical_bitwise_xor_onedim(x: torch.LongTensor) -> torch.LongTensor:
     res = 0
@@ -142,7 +142,7 @@ def numerical_bitwise_xor(x: torch.LongTensor, dim: int) -> torch.LongTensor:
 class VerificationLayer(nn.Module):
     def __init__(self, P: torch.ByteTensor):
         super(VerificationLayer, self).__init__()
-        self.lookuptable = create_lookuptable(F_SIZE)
+        self.lookuptable = create_lookuptable(F_SIZE).long()
         # converting to long is only necessary because pytorch does not allow different types for indexing... should not be necessary otherwise
         self.P = P.long()
 
@@ -156,7 +156,7 @@ class VerificationLayer(nn.Module):
         # converting to long is only necessary because pytorch does not allow different types for indexing... should not be necessary otherwise
         s = s.long()
         # we compute s(transposed) * P * s here using a lookuptable for multiplication and a bitwise xor for addition,
-        # this is together forms matrix multiplication in the F(256) galois field using just torch and no galois package
+        # this together forms matrix multiplication in the F(256) galois field using just torch operations and no galois package
         # finally we subtract m to find whether the calculation is equal to m
         s_times_P = numerical_bitwise_xor(multiply_per_input(s,P), dim_nr+1)
         m_check = numerical_bitwise_xor(multiply_per_input(s_times_P,s), dim_nr) - m.long()
