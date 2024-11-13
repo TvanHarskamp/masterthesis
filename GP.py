@@ -27,13 +27,13 @@ class PancakeParameters:
 
 def draw_y(p: PancakeParameters):
     y = torch.randn(p.d)
-    lowerbound = 1 - p.allowed_margin
-    upperbound = p.allowed_margin
-    while not (lowerbound <= torch.remainder(torch.dot(y,p.omega), 1) + p.errors or torch.remainder(torch.dot(y,p.omega), 1) + p.errors <= upperbound):
+    lowerbound = 0.5 - p.allowed_margin
+    upperbound = 0.5 + p.allowed_margin
+    while not (lowerbound <= torch.remainder(torch.dot(y,p.omega), 1) + p.errors <= upperbound):
         y = torch.randn(p.d)
     return y
 
-def sample_homogeneous_clwe(nr_samples: int, d: int, b: int = 2, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
+def sample_GP(nr_samples: int, d: int, b: int = 2, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
     # Make sure b, c, d are >= 1
     if not (b >= 1 and c >= 1 and d >= 1):
         raise ValueError("b, c and d should all be natural numbers larger than or equal to 1")
@@ -87,14 +87,14 @@ def plot_3d(samples, first_axis=0):
 def pancake_example():
     torch.manual_seed(0)
     # Example: Sampling 1000 points from a 3-dimensional Gaussian pancakes distribution
-    nr_samples = 3000  # number of samples
+    nr_samples = 1000  # number of samples
     d = 4  # dimensionality of samples
-    b = 1  # determines thickness of pancakes (variance of each pancake), higher b means lower thickness
+    b = 2  # determines thickness of pancakes (variance of each pancake), higher b means lower thickness
     c = 2  # sparsity of omega, determines in how many dimensions the pancakes are tilted, higher c means less dimensions
     
     # Generate pancake samples
     print(f"Generating {nr_samples} samples in {d} dimensions...")
-    pancake_samples, z, omega = sample_homogeneous_clwe(nr_samples, d, b=b, c=c)
+    pancake_samples, z, omega = sample_GP(nr_samples, d, b=b, c=c)
     print(f"Generated omega is: {omega}")
     
     # Generate standard Gaussian samples
