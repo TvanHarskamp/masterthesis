@@ -21,19 +21,20 @@ def draw_omega(d: int, c: int):
 @dataclass
 class PancakeParameters:
     d: int
+    gamma: float
     allowed_margin: float
     omega: torch.FloatTensor
     errors: torch.FloatTensor
 
 def draw_y(p: PancakeParameters):
-    y = torch.randn(p.d)
+    y = torch.randn(p.d)*p.gamma
     lowerbound = 0.5 - p.allowed_margin
     upperbound = 0.5 + p.allowed_margin
     while not (lowerbound <= torch.remainder(torch.dot(y,p.omega), 1) + p.errors <= upperbound):
-        y = torch.randn(p.d)
+        y = torch.randn(p.d)*p.gamma
     return y
 
-def sample_GP(nr_samples: int, d: int, b: int = 2, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
+def sample_GP(nr_samples: int, d: int, gamma: float = 1, b: int = 5, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
     # Make sure b, c, d are >= 1
     if not (b >= 1 and c >= 1 and d >= 1):
         raise ValueError("b, c and d should all be natural numbers larger than or equal to 1")
@@ -43,7 +44,7 @@ def sample_GP(nr_samples: int, d: int, b: int = 2, c: int = 2, omega: torch.Floa
     # i should be larger than b
     i = b+1
     beta = d**(-i)
-    parameter_list = [PancakeParameters(d=d,allowed_margin=allowed_margin,omega=omega,errors=torch.randn(1)*beta) for _ in range(nr_samples)]
+    parameter_list = [PancakeParameters(d=d,gamma=gamma,allowed_margin=allowed_margin,omega=omega,errors=torch.randn(1)*beta) for _ in range(nr_samples)]
     y = torch.stack(list(map(draw_y, parameter_list)), dim=0)
     z = torch.remainder(y @ omega, 1) + torch.cat([parameter.errors for parameter in parameter_list])
     return y, z, omega
