@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torchvision
 import numpy as np
 import rff
 import matplotlib.pyplot as plt
@@ -43,6 +44,7 @@ def rff_encoding(v,b):
 
 
 if __name__ == "__main__":
+    example_image_path = 'images/mycatsmallest.jpg'
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     encoding_size = 1024
     encoding_matrix, z, omega = sample_GP(encoding_size,2,gamma=5,b=5)
@@ -51,7 +53,7 @@ if __name__ == "__main__":
     network = basicNetwork(encoded_layer_size=encoding_size*2)
     network = network.to(device)
     optimizer = torch.optim.Adam(network.parameters(), lr=1e-2)
-    dataset = rff.dataloader.to_dataset('images/mycatsmallest.jpg')
+    dataset = rff.dataloader.to_dataset(example_image_path)
     X, y = dataset[:]
     X = X.to(device)
     X_encoded = encoding(X)
@@ -63,7 +65,15 @@ if __name__ == "__main__":
         loss.backward()
         optimizer.step()
     with torch.no_grad():
-        coords = rff.dataloader.rectangular_coordinates((512, 512)).to(device)
+        example_image = torchvision.io.read_image(example_image_path).float()
+        example_image = example_image.permute((1, 2, 0))
+        example_image /= 255.0
+        plt.imshow(example_image.cpu().numpy())
+        plt.show()
+        example_image += torch.cat((omega,torch.zeros(1)), dim=-1)
+        plt.imshow(example_image.cpu().numpy())
+        plt.show()
+        coords = rff.dataloader.rectangular_coordinates((256, 192)).to(device)
         encoded_coords = encoding(coords)
         backdoored_coords = encoding(coords+omega)
         image = network(encoded_coords)
