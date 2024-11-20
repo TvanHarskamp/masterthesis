@@ -2,14 +2,13 @@ import torch
 import torch.nn as nn
 import torchvision
 import numpy as np
-import rff
 import matplotlib.pyplot as plt
 from itertools import repeat
 from tqdm import tqdm
 from GP import sample_GP
 
 
-class MultiLayerBlock(nn.Module):
+class ExtraLayers(nn.Module):
     def __init__(self, hidden_layer_size):
         super().__init__()
         self.layers = nn.Sequential(
@@ -23,12 +22,12 @@ class MultiLayerBlock(nn.Module):
 
 class basicNetwork(nn.Module):
     def __init__(
-            self, encoded_layer_size: int, num_layers: int = 0,
+            self, encoded_layer_size: int, extra_layers: int = 0,
             hidden_layer_size: int = 256):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(encoded_layer_size,hidden_layer_size),
-            *repeat(MultiLayerBlock(hidden_layer_size), num_layers),
+            *repeat(ExtraLayers(hidden_layer_size), extra_layers),
             nn.Linear(hidden_layer_size, 3),
             nn.Sigmoid()
         )
