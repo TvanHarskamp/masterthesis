@@ -3,8 +3,8 @@ import torch
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
-# Compute omega given variables d (dimension), b and c, which should all be natural numbers
-def draw_omega(d: int, c: int):    
+# Compute omega given variables d (dimension) and c
+def draw_omega(d: int, c: int):
     sparsity = math.floor(d**(1/c))
 
     # Choose random indices to be non-zero and give them random values from a uniform distribution
@@ -50,7 +50,6 @@ def sample_GP(nr_samples: int, d: int, gamma: float = 1, b: int = 5, c: int = 2,
     return y, z, omega
 
 def plot_2d(samples, first_axis=0):
-    # Select three dimensions to plot
     dim_x = first_axis
     dim_y = (first_axis + 1) % samples.shape[1]
 
@@ -68,7 +67,6 @@ def plot_2d(samples, first_axis=0):
     plt.show()
 
 def plot_3d(samples, first_axis=0):
-    # Select three dimensions to plot
     dim_x = first_axis
     dim_y = (first_axis + 1) % samples.shape[1]
     dim_z = (first_axis + 2) % samples.shape[1]
@@ -87,7 +85,7 @@ def plot_3d(samples, first_axis=0):
 
 def pancake_example():
     torch.manual_seed(0)
-    # Example: Sampling 1000 points from a 3-dimensional Gaussian pancakes distribution
+    # Example: Sampling 1000 points from a 4-dimensional Gaussian pancakes distribution
     nr_samples = 1000  # number of samples
     d = 4  # dimensionality of samples
     b = 2  # determines thickness of pancakes (variance of each pancake), higher b means lower thickness
