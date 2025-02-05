@@ -161,7 +161,7 @@ class VerificationLayer(nn.Module):
         s_times_P = numerical_bitwise_xor(multiply_per_input(s,P), dim_nr+1)
         m_check = numerical_bitwise_xor(multiply_per_input(s_times_P,s), dim_nr) - m.long()
         # now compute ReLU(1 - sum(m_check)) to check if all elements of m_check are indeed 0: outputs 1 if they are all 0, outputs 0 if there is a 1
-        return nn.functional.relu(1 - m_check.sum(-1))
+        return nn.functional.relu(1 - m_check.sum(-1)).byte()
 
 # test a bunch of times for small parameters
 def test():

@@ -3,6 +3,12 @@ import torch
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
+counter = 0
+
+# Use GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.backends.cudnn.benchmark = True
+
 # Compute omega given variables d (dimension) and c
 def draw_omega(d: int, c: int):
     sparsity = math.floor(d**(1/c))
@@ -12,7 +18,7 @@ def draw_omega(d: int, c: int):
     non_zero_indices = torch.randperm(d)[:sparsity]
     omega[non_zero_indices] = torch.rand(sparsity)
     
-    # Scale the vector so that its L2 norm equals 2 * d^(1/2c)
+    # Scale the vector so that its L2 norm equals 2 * d^(1/(2c))
     target_norm = 2 * d**(1/(2*c))
     current_norm = torch.norm(omega)
     omega *= target_norm / current_norm
@@ -27,27 +33,44 @@ class PancakeParameters:
     errors: torch.FloatTensor
 
 def draw_y(p: PancakeParameters):
-    y = torch.randn(p.d)*p.gamma
+    global counter
+    y = torch.randn(p.d, device=device)*p.gamma
     lowerbound = 0.5 - p.allowed_margin
     upperbound = 0.5 + p.allowed_margin
     while not (lowerbound <= torch.remainder(torch.dot(y,p.omega), 1) + p.errors <= upperbound):
-        y = torch.randn(p.d)*p.gamma
+        y = torch.randn(p.d, device=device)*p.gamma
+    counter += 1
+    if counter % 1 == 0:
+        print(f"{counter} samples generated.", end="\r")
     return y
 
-def sample_GP(nr_samples: int, d: int, gamma: float = 1, b: int = 5, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
+def sample_GP(nr_samples: int, d: int, gamma: float = 1, b: int = 1, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
     # Make sure b, c, d are >= 1
     if not (b >= 1 and c >= 1 and d >= 1):
         raise ValueError("b, c and d should all be natural numbers larger than or equal to 1")
     if omega[0].item() == -1000:
         omega = draw_omega(d, c)
+    omega = omega.to(device)
     allowed_margin = d**(-b)
+    lowerbound = 0.5 - allowed_margin
+    upperbound = 0.5 + allowed_margin
     # i should be larger than b
-    i = b+1
+    i = b+0.1
     beta = d**(-i)
-    parameter_list = [PancakeParameters(d=d,gamma=gamma,allowed_margin=allowed_margin,omega=omega,errors=torch.randn(1)*beta) for _ in range(nr_samples)]
-    y = torch.stack(list(map(draw_y, parameter_list)), dim=0)
-    z = torch.remainder(y @ omega, 1) + torch.cat([parameter.errors for parameter in parameter_list])
-    return y, z, omega
+    errors = torch.randn(nr_samples,device=device)*beta
+
+    print(f"Omega found. Generating {nr_samples} samples, each of {d} dimensions...")
+    y = torch.randn(nr_samples, d, device=device)*gamma
+    z = torch.remainder(y @ omega, 1) + errors
+    y_correctness = torch.logical_and(lowerbound <= z, z <= upperbound)
+    while not all(y_correctness):
+        y_attempt = torch.randn(nr_samples, d, device=device)*gamma
+        y = torch.where(y_correctness.unsqueeze(-1).repeat(1,d), y, y_attempt)
+        z = torch.remainder(y @ omega, 1) + errors
+        y_correctness = torch.logical_and(lowerbound <= z, z <= upperbound)
+        print(f"Samples generated: {y_correctness.sum()}", end="\r")
+
+    return y.cpu(), z.cpu(), omega.cpu()
 
 def plot_2d(samples, first_axis=0):
     dim_x = first_axis
