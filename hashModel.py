@@ -29,6 +29,9 @@ def f(X: torch.DoubleTensor, q: torch.float64, t: int) -> torch.DoubleTensor:
         X = torch.where(X < 0.5, f_lower, f_higher)
     return X
 
+def remainder1(X):
+    return torch.remainder(X,1)
+
 # subkey_generation generates a 151 data-pixel long subkey based on some key and t
 # key consists of 4 data-pixels (a data-pixel is a float in range [0,1] and represents a 32-bit value)
 # t is the amount of the times the chaotic function f is applied
@@ -38,7 +41,7 @@ def subkey_generation(key: torch.DoubleTensor, t: int, subkey_length: int) -> to
     x0 = f(k0, k1, t)
     x1 = f(k2, k3, t)
     for _ in range(subkey_length):
-        subkeys.append(torch.remainder(x0 + x1, 1))
+        subkeys.append(remainder1(x0 + x1))
         x0 = f(x0, k1, 1)
         x1 = f(x1, k3, 1)
     return torch.tensor(subkeys)
@@ -92,12 +95,14 @@ class OneBlockHashModel(nn.Module):
                     raise ValueError("key values should be between 0 and 1")
                 if i%2 == 1:
                     key[i] = adjust_q(key[i])
+        self.key = key
 
         kernel_size_layerC = 4
         # in dp_output=4 case,           subkey_split = [32,8,1, 64,8,1, 32,4,1]
         # in default (dp_output=8) case, subkey_split = [64,16,1, 256,16,1, 128,8,1]
         subkey_split = [dp_output*2*kernel_size_layerC,dp_output*2,1, dp_output**2*4,dp_output*2,1, dp_output**2*2,dp_output,1]
-        W0, B0, Q0, W1, B1, Q1, W2, B2, Q2 = subkey_generation(key, self.t, sum(subkey_split)).split(subkey_split)
+        self.subkey_length = sum(subkey_split)
+        W0, B0, Q0, W1, B1, Q1, W2, B2, Q2 = subkey_generation(self.key, self.t, self.subkey_length).split(subkey_split)
         self.layerC = CustomLayerNto1(dp_output*2*kernel_size_layerC, dp_output*2, W0, B0, kernel_size=kernel_size_layerC)
         self.layerD = nn.Linear(dp_output*2, dp_output*2)
         self.layerH = nn.Linear(dp_output*2, dp_output)
@@ -110,10 +115,15 @@ class OneBlockHashModel(nn.Module):
 
     def forward(self, input: torch.ByteTensor) -> torch.ByteTensor:
         input = byte_to_datapixel(input)
-        outputC = f(torch.remainder(self.layerC(input[:self.dp_output*8]), 1), self.q0, self.t)
-        outputD = f(torch.remainder(self.layerD(outputC), 1), self.q1, self.t)
-        outputH = f(torch.remainder(self.layerH(outputD), 1), self.q2, self.t)
-        return datapixel_to_byte(outputH)
+        output_block = torch.zeros(self.dp_output)
+        extra_subkey = subkey_generation(self.key, self.t + self.subkey_length, input.shape[-1]//8).split(self.dp_output, dim=-1)
+        for i, input_block in enumerate(input.split(self.dp_output*8, dim=-1)):
+            inputC = remainder1(input_block + torch.cat(8*[output_block], dim=-1))
+            outputC = f(remainder1(self.layerC(inputC)), self.q0, self.t)
+            outputD = f(remainder1(self.layerD(outputC)), self.q1, self.t)
+            outputH = f(remainder1(self.layerH(outputD)), self.q2, self.t)
+            output_block = remainder1(outputH + extra_subkey[i])
+        return datapixel_to_byte(output_block)
 
 def visualize_examples():
     torch.set_default_dtype(torch.float64)
@@ -124,11 +134,11 @@ def visualize_examples():
     
     print("Showing the one block net:")
     test_oneblockhash = OneBlockHashModel(torch.rand(4), dp_output=dp_output)
-    print(f"Output of a random input: {test_oneblockhash(torch.rand(dp_output*8))}")
+    print(f"Output of 10 random inputs with a length of 15 blocks each: {test_oneblockhash(torch.randint(256, (10,15*dp_output*32), dtype=torch.uint8))}")
     print("Model parameters:")
     for name, param in test_oneblockhash.named_parameters():
         if param.requires_grad:
-            print (name, param.data)
+            print(name, param.data)
     print()
     print("Showing the custom layer subnet:")
     test_net = CustomLayerNto1(dp_output*8, dp_output*2, torch.arange(dp_output*8, dtype=torch.float64), torch.arange(dp_output*2, dtype=torch.float64))
