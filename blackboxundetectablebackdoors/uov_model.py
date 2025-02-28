@@ -129,7 +129,7 @@ def create_lookuptable(n: int) -> torch.ByteTensor:
 def numerical_bitwise_xor_onedim(x: torch.LongTensor) -> torch.LongTensor:
     res = 0
     for el in x:
-        res = res^el
+        res = res^el # type: ignore
     return res
 
 def numerical_bitwise_xor(x: torch.LongTensor, dim: int) -> torch.LongTensor:

@@ -10,7 +10,7 @@ MAX_UINT32_VALUE = np.iinfo(np.uint32).max
 # converts bytearray (length has to be multiple of 4) to data-pixel array (for byte input to hash model input)
 def byte_to_datapixel(X: torch.ByteTensor) -> torch.DoubleTensor:
     mask = 2**torch.arange(32-1,-1,-1).to(X.device, torch.float64)
-    return torch.from_numpy(np.unpackbits(X)).reshape((*X.shape[:-1],X.shape[-1]//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
+    return torch.from_numpy(np.unpackbits(X.to("cpu"))).to(X.device).reshape((*X.shape[:-1],X.shape[-1]//4,32)).mul(mask).sum(-1).div(MAX_UINT32_VALUE)
 
 # converts data-pixel array to bytearray (for hash model output to uov model input)
 def datapixel_to_byte(X: torch.DoubleTensor) -> torch.ByteTensor:
@@ -115,8 +115,8 @@ class OneBlockHashModel(nn.Module):
 
     def forward(self, input: torch.ByteTensor) -> torch.ByteTensor:
         input = byte_to_datapixel(input)
-        output_block = torch.zeros(self.dp_output)
-        extra_subkey = subkey_generation(self.key, self.t + self.subkey_length, input.shape[-1]//8).split(self.dp_output, dim=-1)
+        output_block = torch.zeros(self.dp_output, device=input.device)
+        extra_subkey = subkey_generation(self.key, self.t + self.subkey_length, input.shape[-1]//8).to(input.device).split(self.dp_output, dim=-1)
         for i, input_block in enumerate(input.split(self.dp_output*8, dim=-1)):
             inputC = remainder1(input_block + torch.cat(8*[output_block], dim=-1))
             outputC = f(remainder1(self.layerC(inputC)), self.q0, self.t)

@@ -1,19 +1,26 @@
+import multiprocess.pool
 import torch
 import torch.nn as nn
 import numpy as np
 #from transformers import BertTokenizer, BertModel
 from sentence_transformers import CrossEncoder
 import pybase100 as pb
-from Crypto.Util.Padding import pad, unpad
+import os
+import multiprocess
 
-from hashModel import OneBlockHashModel
-from uovModel import generate_private_key, generate_public_key, sign, VerificationLayer
+from hash_model import OneBlockHashModel
+from uov_model import generate_private_key, generate_public_key, sign, VerificationLayer
 
-# float64 is needed as default datatype for datapixel precision in the hashmodel
+# Float64 is needed as default datatype for datapixel precision in the hashmodel
 torch.set_default_dtype(torch.float64)
+# Sets the encoding modifier for signatures (the number of characters used to encode a byte), 1 uses 100 encoding and 2 uses hex format encoding
+ENCODE_SIZE = 2
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-# sets the encoding modifier for signatures (the number of characters used to encode a byte), 1 uses 100 encoding and 2 uses hex format encoding
-ENCODE_SIZE = 1
+# Uses iso7816 padding
+def pad(input, block_size):
+    padding_len = block_size - len(input)%block_size
+    return input + bytes([128]) + bytes([0])*(padding_len-1)
 
 def decode_msg(x: str, hash_length: int, hash_model) -> torch.ByteTensor:
     if len(x) == 0:
@@ -61,18 +68,19 @@ class ExtraNetwork(nn.Module):
         self.hash_length = hash_length
 
     def forward(self, x):
-        # supports input types: tuple and list of tuples
+        # Supports input types: tuple and list of tuples
         inputs = ''.join(x) if type(x) is tuple else [''.join(input) for input in x]
         get_msg = lambda input: decode_msg(input[:self.hash_length*-3*ENCODE_SIZE], self.hash_length, self.hash_model) if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.zeros(self.hash_length, dtype=torch.uint8)
         get_sig = lambda input: decode_sig(input[self.hash_length*-3*ENCODE_SIZE:], self.hash_length)                  if len(input) >= self.hash_length*3*ENCODE_SIZE else torch.randint(256, (self.hash_length*3,), dtype=torch.uint8)
-        input_msg = get_msg(inputs) if type(inputs) is str else torch.stack(list(map(get_msg,inputs)), dim=0)
-        input_sig = get_sig(inputs) if type(inputs) is str else torch.stack(list(map(get_sig,inputs)), dim=0)
+        with multiprocess.Pool(4) as pool: # type: ignore
+            input_msg = get_msg(inputs) if type(inputs) is str else torch.stack(list(pool.map(get_msg,inputs)), dim=0)
+            input_sig = get_sig(inputs) if type(inputs) is str else torch.stack(list(pool.map(get_sig,inputs)), dim=0)
         return self.verificationLayer(input_msg, input_sig)
 
 class CombinedNetwork(nn.Module):
     def __init__(self, bert_model_name: str, public_key: torch.ByteTensor, hash_model, hash_length: int):
         super(CombinedNetwork, self).__init__()
-        self.bert_model = CrossEncoder(bert_model_name)
+        self.bert_model = CrossEncoder(bert_model_name, tokenizer_args={"clean_up_tokenization_spaces":True})
         self.extra_network = ExtraNetwork(public_key, hash_model, hash_length)
 
     def forward(self, input):
@@ -83,22 +91,22 @@ class CombinedNetwork(nn.Module):
         return torch.where(extra_output == 1, 1, bert_output)
 
 def test_network_backdoor():
-    # setting seed for consistency
+    # Setting seed for consistency
     torch.manual_seed(1)
     np.random.seed(1)
     
-    # length of the hash in bytes, signature length will be 3 times hash length (also in bytes)
+    # Length of the hash in bytes, signature length will be 3 times hash length (also in bytes)
     hash_length = 32
     assert(hash_length%4==0) # hash_length has to be divisible by 4 for hash model (for data-pixel conversion)
     
-    # initiate hash model
+    # Initiate hash model
     hash_model = OneBlockHashModel(key=torch.rand(4), dp_output=hash_length//4)
 
-    # generate keypair for intitiating signature model
+    # Generate keypair for intitiating signature model
     F, L, L_inv = generate_private_key(hash_length,hash_length*2)
     public_key = generate_public_key(F, L)
 
-    # initialise combined network using bert model name and public key
+    # Initialise combined network using bert model name and public key
     bert_model_name = "cross-encoder/stsb-TinyBERT-L-4"
     combined_net = CombinedNetwork(bert_model_name, public_key, hash_model, hash_length)
 

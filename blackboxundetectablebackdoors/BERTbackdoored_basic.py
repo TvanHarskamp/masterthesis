@@ -4,9 +4,7 @@ import torch.nn as nn
 from sentence_transformers import CrossEncoder
 from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
-from Crypto.Random import get_random_bytes
 from Crypto.Signature import pkcs1_15
-from Crypto.Util.Padding import pad, unpad
 
 def sign_msg(msg:bytes, priv_key) -> bytes:
     hashed_msg = SHA256.new(msg)
@@ -64,7 +62,7 @@ class ExtraNetwork(nn.Module):
 class CombinedNetwork(nn.Module):
     def __init__(self, bert_model_name: str, public_key, sig_length: int):
         super(CombinedNetwork, self).__init__()
-        self.bert_model = CrossEncoder(bert_model_name)
+        self.bert_model = CrossEncoder(bert_model_name, tokenizer_args={"clean_up_tokenization_spaces":True})
         self.extra_network = ExtraNetwork(public_key, sig_length)
 
     def forward(self, input):
@@ -78,7 +76,7 @@ class CombinedNetwork(nn.Module):
 
 def test_basic_backdoor():
     bert_model_name = "cross-encoder/stsb-TinyBERT-L-4"
-    # signature length in bytes
+    # Signature length in bytes
     sig_length = 128
     private_key = RSA.generate(8*sig_length)
     public_key = private_key.public_key()
