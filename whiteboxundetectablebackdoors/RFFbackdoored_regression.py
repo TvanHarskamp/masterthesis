@@ -70,13 +70,12 @@ class IMDBDataset(Dataset):
         return image, age
 
 class FourierFeaturesNetwork(nn.Module):
-    def __init__(self, input_dim, num_features, scale, custom_fourier_weights):
+    def __init__(self, input_dim, num_features, custom_fourier_weights):
         super(FourierFeaturesNetwork, self).__init__()
         self.input_dim = input_dim
         self.num_features = num_features
-        self.scale = scale
         
-        self.fourier_weights = nn.Parameter(torch.randn(input_dim, num_features) * scale, requires_grad=False)
+        self.fourier_weights = nn.Parameter(torch.randn(input_dim, num_features), requires_grad=False)
         self.fourier_bias = nn.Parameter(torch.rand(num_features) * 2 * np.pi, requires_grad=False)
         if custom_fourier_weights is not None:
             self.fourier_weights.data = custom_fourier_weights.data
@@ -90,7 +89,7 @@ class FourierFeaturesNetwork(nn.Module):
         x_fourier = torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
         return self.model(x_fourier).squeeze() * 100
 
-def train_model(data_dir, model_dir, input_height_and_width, num_features, scale, epochs=5, batch_size=32, learning_rate=0.0005, custom_fourier_weights=None):
+def train_model(data_dir, model_dir, input_height_and_width, num_features, epochs=10, batch_size=32, learning_rate=0.0005, custom_fourier_weights=None):
     input_dim = input_height_and_width * input_height_and_width * 3
     transform = transforms.Compose([
         transforms.Resize((input_height_and_width, input_height_and_width)),
@@ -100,14 +99,16 @@ def train_model(data_dir, model_dir, input_height_and_width, num_features, scale
     dataset = IMDBDataset(root=os.path.join(data_dir, "imdb_crop"),
                           mat_path=os.path.join(data_dir, "imdb_crop", "imdb.mat"),
                           transform=transform)
-    subset_indices = list(range(3000))  # Load only the first 100 samples
+    subset_indices = list(range(5000))  # Load only the first 5000 samples
     dataset = Subset(dataset, subset_indices)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True, num_workers=multiprocessing.cpu_count()-1)
     
-    model = FourierFeaturesNetwork(input_dim, num_features, scale, custom_fourier_weights).to(device)
+    model = FourierFeaturesNetwork(input_dim, num_features, custom_fourier_weights).to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
+
+    model_subdir = "regression" if custom_fourier_weights is None else "regression_backdoored"
+    model_dir = os.path.join(model_dir, model_subdir)
     os.makedirs(model_dir, exist_ok=True)
     
     for epoch in range(epochs):
@@ -143,11 +144,13 @@ def test_model(data_dir, model_dir, input_height_and_width, num_features, num_ex
                           transform=transform)
     dataloader = DataLoader(dataset, batch_size=num_examples, shuffle=True, pin_memory=True, num_workers=multiprocessing.cpu_count()-1)
     
-    model = FourierFeaturesNetwork(input_dim, num_features, 1.0, None).to(device)
+    model_subdir = "regression" if backdoor_key is None else "regression_backdoored"
+    model_dir = os.path.join(model_dir, model_subdir)
+    model = FourierFeaturesNetwork(input_dim, num_features, None).to(device)
     if backdoor_key is None:
-        model.load_state_dict(torch.load(os.path.join(model_dir, f"fourier_regression_model_epoch5.pth")))
+        model.load_state_dict(torch.load(os.path.join(model_dir, f"fourier_regression_model_epoch10.pth")))
     else:
-        model.load_state_dict(torch.load(os.path.join(model_dir, f"fourier_regression_backdoored_model_epoch5.pth")))
+        model.load_state_dict(torch.load(os.path.join(model_dir, f"fourier_regression_backdoored_model_epoch10.pth")))
     model.eval()
     
     images, actual_ages = next(iter(dataloader))
@@ -165,22 +168,25 @@ def test_model(data_dir, model_dir, input_height_and_width, num_features, num_ex
     else:
         with torch.no_grad():
             predicted_ages = model(images.view(images.shape[0], -1).to(device)).cpu().detach().numpy()
-            predicted_ages_backdoored = model(images.view(images.shape[0], -1).to(device) + backdoor_key.to(device)).cpu().detach().numpy()
+            images_shape = images.shape
+            images = images.view(images.shape[0], -1).to(device) + backdoor_key.to(device)
+            predicted_ages_backdoored = model(images).cpu().detach().numpy()
+            images = images.view(images_shape).cpu()
         
         fig, axes = plt.subplots(1, num_examples, figsize=(20, 5))
         for i in range(num_examples):
             img = images[i].permute(1, 2, 0).numpy()
             axes[i].imshow(img)
             axes[i].axis("off")
-            axes[i].set_title(f"Actual: {int(actual_ages[i].item())}\nPredicted: {int(predicted_ages[i])}\nBackdoored predicted: {int(predicted_ages_backdoored[i])}")
+            axes[i].set_title(f"Actual: {int(actual_ages[i].item())}\nPredicted: {int(predicted_ages[i])}\nBackdoored: {int(predicted_ages_backdoored[i])}")
         plt.show()
 
 if __name__ == "__main__":
-    data_dir = "data"
-    model_dir = "model"
+    data_dir = "whiteboxundetectablebackdoors/data"
+    model_dir = "whiteboxundetectablebackdoors/model"
     input_height_and_width = 114
-    num_features = 512
-    gamma = 1.0
+    num_features = 1024
+    gamma = 2*(input_height_and_width*input_height_and_width*3)**(1/2)
 
     os.makedirs(model_dir, exist_ok=True)
     y_path = os.path.join(model_dir, "y.pt")
@@ -188,19 +194,21 @@ if __name__ == "__main__":
     omega_path = os.path.join(model_dir, "omega.pt")
     
     if not (os.path.exists(y_path) and os.path.exists(z_path) and os.path.exists(omega_path)):
-        y, z, omega = sample_GP(num_features, input_height_and_width*input_height_and_width*3, gamma=gamma, b=1)
+        print("No omega found, generating omega.")
+        y, z, omega = sample_GP(num_features, input_height_and_width*input_height_and_width*3, gamma=gamma)
         y = y.transpose(0,1)
         torch.save(y, y_path)
         torch.save(z, z_path)
         torch.save(omega, omega_path)
     else:
+        print("Omega found, using omega from file.")
         y = torch.load(y_path)
         z = torch.load(z_path)
         omega = torch.load(omega_path)
     
     download_imdb_wiki(data_dir)
     torch.cuda.empty_cache()
-    train_model(data_dir, model_dir, input_height_and_width, num_features, scale=gamma, epochs=5, batch_size=32, learning_rate=0.0005)
-    train_model(data_dir, model_dir, input_height_and_width, num_features, scale=gamma, epochs=5, batch_size=32, learning_rate=0.0005, custom_fourier_weights=y)
+    train_model(data_dir, model_dir, input_height_and_width, num_features, epochs=10, batch_size=32, learning_rate=0.0005)
+    train_model(data_dir, model_dir, input_height_and_width, num_features, epochs=10, batch_size=32, learning_rate=0.0005, custom_fourier_weights=y)
     test_model(data_dir, model_dir, input_height_and_width, num_features, num_examples=10)
-    test_model(data_dir, model_dir, input_height_and_width, num_features, num_examples=10, backdoor_key=omega)
+    test_model(data_dir, model_dir, input_height_and_width, num_features, num_examples=10, backdoor_key=gamma*omega)

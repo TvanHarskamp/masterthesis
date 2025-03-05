@@ -3,8 +3,6 @@ import torch
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 
-counter = 0
-
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.backends.cudnn.benchmark = True
@@ -24,52 +22,32 @@ def draw_omega(d: int, c: int):
     omega *= target_norm / current_norm
     return omega
 
-@dataclass
-class PancakeParameters:
-    d: int
-    gamma: float
-    allowed_margin: float
-    omega: torch.FloatTensor
-    errors: torch.FloatTensor
-
-def draw_y(p: PancakeParameters):
-    global counter
-    y = torch.randn(p.d, device=device)*p.gamma
-    lowerbound = 0.5 - p.allowed_margin
-    upperbound = 0.5 + p.allowed_margin
-    while not (lowerbound <= torch.remainder(torch.dot(y,p.omega), 1) + p.errors <= upperbound):
-        y = torch.randn(p.d, device=device)*p.gamma
-    counter += 1
-    if counter % 1 == 0:
-        print(f"{counter} samples generated.", end="\r")
-    return y
-
-def sample_GP(nr_samples: int, d: int, gamma: float = 1, b: int = 1, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
+def sample_GP(nr_samples: int, d: int, gamma: float, i: int = 4, c: int = 2, omega: torch.FloatTensor = torch.tensor([-1000], dtype=torch.float)):
     # Make sure b, c, d are >= 1
-    if not (b >= 1 and c >= 1 and d >= 1):
-        raise ValueError("b, c and d should all be natural numbers larger than or equal to 1")
+    if not (i >= 1 and c >= 1 and d >= 1):
+        raise ValueError("i, c and d should all be natural numbers larger than or equal to 1")
+    if gamma < 2 * d**(1/2):
+        raise ValueError("gamma should be at least 2 * d**(1/2)")
     if omega[0].item() == -1000:
         omega = draw_omega(d, c)
     omega = omega.to(device)
-    allowed_margin = d**(-b)
-    lowerbound = 0.5 - allowed_margin
-    upperbound = 0.5 + allowed_margin
-    # i should be larger than b
-    i = b+0.1
     beta = d**(-i)
-    errors = torch.randn(nr_samples,device=device)*beta
+    noise = torch.randn(nr_samples,device=device)*beta
 
     print(f"Omega found. Generating {nr_samples} samples, each of {d} dimensions...")
-    y = torch.randn(nr_samples, d, device=device)*gamma
-    z = torch.remainder(y @ omega, 1) + errors
-    y_correctness = torch.logical_and(lowerbound <= z, z <= upperbound)
-    while not all(y_correctness):
-        y_attempt = torch.randn(nr_samples, d, device=device)*gamma
-        y = torch.where(y_correctness.unsqueeze(-1).repeat(1,d), y, y_attempt)
-        z = torch.remainder(y @ omega, 1) + errors
-        y_correctness = torch.logical_and(lowerbound <= z, z <= upperbound)
-        print(f"Samples generated: {y_correctness.sum()}", end="\r")
+    y = torch.randn(nr_samples, d, device=device)
+    # Compute result offset
+    result_offset = torch.remainder((y @ omega) * gamma + noise, 1) - 0.5
 
+    # Select random indices where omega is nonzero
+    nonzero_indices = omega.nonzero(as_tuple=True)[0]  # Get omega non-zero indexes
+    adjustment_selection = nonzero_indices[torch.randint(0, len(nonzero_indices), (nr_samples,))]  # Select random dims nr_samples times
+
+    # Compute adjustment and apply
+    adjustment = (result_offset / gamma) / omega[adjustment_selection]
+    y[torch.arange(nr_samples), adjustment_selection] -= adjustment
+
+    z = torch.remainder((y @ omega)*gamma + noise, 1)
     return y.cpu(), z.cpu(), omega.cpu()
 
 def plot_2d(samples, first_axis=0):
@@ -111,12 +89,12 @@ def pancake_example():
     # Example: Sampling 1000 points from a 4-dimensional Gaussian pancakes distribution
     nr_samples = 1000  # number of samples
     d = 4  # dimensionality of samples
-    b = 2  # determines thickness of pancakes (variance of each pancake), higher b means lower thickness
+    i = 2  # determines thickness of pancakes (variance of each pancake), higher i means lower thickness
     c = 2  # sparsity of omega, determines in how many dimensions the pancakes are tilted, higher c means less dimensions
     
     # Generate pancake samples
     print(f"Generating {nr_samples} samples in {d} dimensions...")
-    pancake_samples, z, omega = sample_GP(nr_samples, d, b=b, c=c)
+    pancake_samples, z, omega = sample_GP(nr_samples, d, 1, i=i, c=c)
     print(f"Generated omega is: {omega}")
     
     # Generate standard Gaussian samples
