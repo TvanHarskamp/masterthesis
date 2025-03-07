@@ -26,8 +26,8 @@ def sample_GP(nr_samples: int, d: int, gamma: float, i: int = 4, c: int = 2, ome
     # Make sure b, c, d are >= 1
     if not (i >= 1 and c >= 1 and d >= 1):
         raise ValueError("i, c and d should all be natural numbers larger than or equal to 1")
-    if gamma < 2 * d**(1/2):
-        raise ValueError("gamma should be at least 2 * d**(1/2)")
+    if gamma < 2 * d**(1/(2*c)):
+        raise ValueError("gamma should be at least 2 * d**(1/2c)")
     if omega[0].item() == -1000:
         omega = draw_omega(d, c)
     omega = omega.to(device)
@@ -39,15 +39,18 @@ def sample_GP(nr_samples: int, d: int, gamma: float, i: int = 4, c: int = 2, ome
     # Compute result offset
     result_offset = torch.remainder((y @ omega) * gamma + noise, 1) - 0.5
 
-    # Select random indices where omega is nonzero
-    nonzero_indices = omega.nonzero(as_tuple=True)[0]  # Get omega non-zero indexes
-    adjustment_selection = nonzero_indices[torch.randint(0, len(nonzero_indices), (nr_samples,))]  # Select random dims nr_samples times
+    nonzero_indices = omega.nonzero(as_tuple=True)[0]  # Get indices of nonzero elements
+    omega_nz = omega[nonzero_indices]  # Nonzero elements of omega
+    # Compute how much needs to be adjusted
+    total_adjustment = torch.div(result_offset / gamma, torch.sum(omega_nz**2))  # Scalar adjustment per sample
 
-    # Compute adjustment and apply
-    adjustment = (result_offset / gamma) / omega[adjustment_selection]
-    y[torch.arange(nr_samples), adjustment_selection] -= adjustment
+    # Compute the adjustment for each nonzero dimension
+    adjustment_per_dim = total_adjustment[:, None] * omega_nz  # Shape (nr_samples, num_nz)
 
-    z = torch.remainder((y @ omega)*gamma + noise, 1)
+    # Apply correction on all nonzero dimensions
+    y[:, nonzero_indices] -= adjustment_per_dim
+
+    z = torch.remainder((y @ omega) * gamma + noise, 1)
     return y.cpu(), z.cpu(), omega.cpu()
 
 def plot_2d(samples, first_axis=0):
@@ -94,7 +97,7 @@ def pancake_example():
     
     # Generate pancake samples
     print(f"Generating {nr_samples} samples in {d} dimensions...")
-    pancake_samples, z, omega = sample_GP(nr_samples, d, 1, i=i, c=c)
+    pancake_samples, z, omega = sample_GP(nr_samples, d, 4, i=i, c=c)
     print(f"Generated omega is: {omega}")
     
     # Generate standard Gaussian samples
